@@ -1,0 +1,420 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grade 8 Results Portal</title>
+  <style>
+    :root {
+      --navy: #15345b;
+      --blue: #2459a9;
+      --bg: #f3f6fb;
+      --border: #dce3ed;
+      --text: #1c2b40;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      background: var(--navy);
+      color: white;
+      padding: 22px 6%;
+    }
+    header h1 { margin: 0 0 6px; font-size: 24px; }
+    header p { margin: 0; color: #dce8f8; }
+    main { max-width: 1050px; margin: 30px auto; padding: 0 16px; }
+    .card {
+      background: white;
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 15px #152c4c0a;
+    }
+    h2 { margin-top: 0; color: var(--navy); }
+    label { display: block; font-weight: bold; margin: 14px 0 7px; }
+    input, select {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 15px;
+      background: white;
+    }
+    button {
+      padding: 12px 17px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--blue);
+      color: white;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 16px;
+    }
+    button:hover { opacity: .9; }
+    button.secondary { background: #e7edf6; color: var(--navy); }
+    .row { display: flex; flex-wrap: wrap; gap: 16px; }
+    .row > div { flex: 1; min-width: 220px; }
+    .muted { color: #627187; font-size: 14px; line-height: 1.5; }
+    .status { padding: 12px; border-radius: 8px; margin: 14px 0; }
+    .error { background: #fff0f0; color: #a12626; }
+    .success { background: #eaf8ef; color: #176337; }
+    .hidden { display: none !important; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td {
+      padding: 11px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    th { background: #edf2f9; }
+    footer { text-align: center; color: #6b7789; padding: 20px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Grade 8 Results Portal</h1>
+    <p>Student assessment and academic results management</p>
+  </header>
+
+  <main>
+    <section id="login" class="card">
+      <h2>Teacher / Administrator Sign In</h2>
+      <p class="muted">Sign in using an account already created in Supabase Authentication.</p>
+      <form id="loginForm">
+        <label for="email">Email address</label>
+        <input id="email" type="email" autocomplete="username" required>
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Sign In</button>
+      </form>
+      <div id="loginMessage" aria-live="polite"></div>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div>
+            <h2 id="welcome">Dashboard</h2>
+            <p id="roleText" class="muted"></p>
+          </div>
+          <div style="text-align:right">
+            <button id="logoutButton" class="secondary">Sign Out</button>
+          </div>
+        </div>
+        <div id="appMessage" aria-live="polite"></div>
+      </div>
+
+      <section id="teacherPanel" class="card hidden">
+        <h2>Enter Student Marks</h2>
+        <p class="muted">Choose your assigned subject, select a learner, enter the mark out of 100, and save.</p>
+        <form id="marksForm">
+          <label for="subject">Assigned subject</label>
+          <select id="subject" required>
+            <option value="">Loading subjects...</option>
+          </select>
+
+          <label for="student">Student</label>
+          <select id="student" required>
+            <option value="">Select a student</option>
+          </select>
+
+          <label for="score">Mark (0–100)</label>
+          <input id="score" type="number" min="0" max="100" step="1" required>
+
+          <button type="submit">Save Mark</button>
+        </form>
+      </section>
+
+      <section id="adminPanel" class="card hidden">
+        <h2>Grade 8 Results</h2>
+        <p class="muted">The results view shows marks available to your authenticated account under database permissions.</p>
+        <button id="refreshResults" type="button">Refresh Results</button>
+        <div id="resultsMessage" aria-live="polite"></div>
+        <div class="table-wrap">
+          <table>
+            <thead id="resultsHead"></thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer>Grade 8 Results Portal</footer>
+
+  <script type="module">
+    import { createClient } from
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+    // This is a publishable key, not a secret/service_role key.
+    const SUPABASE_URL = "https://xrlbaiefxsainqxcmgct.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_rOj-B_B8wzlVlTf1GijWZg_6uLaNo9t";
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const $ = (id) => document.getElementById(id);
+    let currentUser = null;
+    let subjects = [];
+    let students = [];
+
+    function message(element, text, type = "error") {
+      element.innerHTML = "";
+      if (!text) return;
+      const div = document.createElement("div");
+      div.className = "status " + type;
+      div.textContent = text;
+      element.appendChild(div);
+    }
+
+    function showLogin() {
+      $("login").classList.remove("hidden");
+      $("dashboard").classList.add("hidden");
+      $("teacherPanel").classList.add("hidden");
+      $("adminPanel").classList.add("hidden");
+    }
+
+    function showDashboard(profile) {
+      $("login").classList.add("hidden");
+      $("dashboard").classList.remove("hidden");
+      $("welcome").textContent = "Welcome, " + (profile.full_name || currentUser.email);
+      $("roleText").textContent = "Account role: " + profile.role;
+
+      $("teacherPanel").classList.toggle("hidden", profile.role !== "teacher");
+      $("adminPanel").classList.toggle("hidden", profile.role !== "admin");
+    }
+
+    async function loadProfile() {
+      const { data: { user }, error: authError } =
+        await supabase.auth.getUser();
+
+      if (authError || !user) {
+        currentUser = null;
+        showLogin();
+        return;
+      }
+
+      currentUser = user;
+
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (error || !profile || !["admin", "teacher"].includes(profile.role)) {
+        showLogin();
+        message(
+          $("loginMessage"),
+          "Your account profile or role could not be verified. Ask your system administrator to check the profiles table and database permissions."
+        );
+        return;
+      }
+
+      showDashboard(profile);
+
+      if (profile.role === "teacher") {
+        await loadTeacherData();
+      } else {
+        await loadResults();
+      }
+    }
+
+    $("loginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      message($("loginMessage"), "Signing in...", "success");
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email: $("email").value.trim(),
+        password: $("password").value
+      });
+
+      if (error) {
+        message($("loginMessage"), "Sign-in failed: " + error.message);
+        return;
+      }
+
+      message($("loginMessage"), "");
+      await loadProfile();
+    });
+
+    $("logoutButton").addEventListener("click", async () => {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        message($("appMessage"), "Could not sign out: " + error.message);
+        return;
+      }
+      currentUser = null;
+      showLogin();
+    });
+
+    async function loadTeacherData() {
+      message($("appMessage"), "Loading assigned subjects and students...", "success");
+
+      const { data: assignments, error: assignmentError } = await supabase
+        .from("teacher_subjects")
+        .select("subject_id")
+        .eq("teacher_id", currentUser.id);
+
+      if (assignmentError) {
+        message($("appMessage"), "Could not load assigned subjects: " + assignmentError.message);
+        return;
+      }
+
+      const subjectIds = (assignments || []).map(row => row.subject_id);
+
+      const { data: subjectData, error: subjectError } = await supabase
+        .from("subjects")
+        .select("id, code, name")
+        .in("id", subjectIds.length ? subjectIds : ["00000000-0000-0000-0000-000000000000"])
+        .order("name");
+
+      if (subjectError) {
+        message($("appMessage"), "Could not load subjects: " + subjectError.message);
+        return;
+      }
+
+      subjects = subjectData || [];
+      $("subject").replaceChildren(new Option("Choose a subject", ""));
+      subjects.forEach(s => $("subject").add(new Option(s.name, s.id)));
+
+      const { data: studentData, error: studentError } = await supabase
+        .from("students")
+        .select("id, admission_no, full_name, grade")
+        .order("full_name");
+
+      if (studentError) {
+        message($("appMessage"), "Could not load students: " + studentError.message);
+        return;
+      }
+
+      students = studentData || [];
+      $("student").replaceChildren(new Option("Choose a student", ""));
+      students.forEach(s => {
+        const label = `${s.full_name} (${s.admission_no})`;
+        $("student").add(new Option(label, s.id));
+      });
+
+      message(
+        $("appMessage"),
+        `Loaded ${subjects.length} assigned subjects and ${students.length} learners.`,
+        "success"
+      );
+    }
+
+    $("marksForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const subjectId = $("subject").value;
+      const studentId = $("student").value;
+      const score = Number($("score").value);
+
+      if (!subjects.some(s => s.id === subjectId)) {
+        message($("appMessage"), "Choose a subject assigned to your account.");
+        return;
+      }
+
+      if (!students.some(s => s.id === studentId)) {
+        message($("appMessage"), "Choose a valid student.");
+        return;
+      }
+
+      if (!Number.isInteger(score) || score < 0 || score > 100) {
+        message($("appMessage"), "Enter a whole-number mark from 0 to 100.");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("marks")
+        .upsert({
+          student_id: studentId,
+          subject_id: subjectId,
+          score: score,
+          entered_by: currentUser.id
+        }, { onConflict: "student_id,subject_id" });
+
+      if (error) {
+        message(
+          $("appMessage"),
+          "Mark was not saved: " + error.message +
+          ". Check your subject assignment and database permissions."
+        );
+        return;
+      }
+
+      message($("appMessage"), "Mark saved successfully.", "success");
+      $("score").value = "";
+    });
+
+    async function loadResults() {
+      message($("resultsMessage"), "Loading results...", "success");
+      $("resultsHead").replaceChildren();
+      $("resultsBody").replaceChildren();
+
+      const { data, error } = await supabase
+        .from("grade8_results")
+        .select("*")
+        .order("position", { ascending: true });
+
+      if (error) {
+        message(
+          $("resultsMessage"),
+          "Could not load results: " + error.message +
+          ". Check that the grade8_results view exists and its permissions are configured."
+        );
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        message($("resultsMessage"), "No results are currently visible to this account.", "success");
+        return;
+      }
+
+      const columns = Object.keys(data[0]);
+      const headRow = document.createElement("tr");
+
+      columns.forEach(column => {
+        const th = document.createElement("th");
+        th.textContent = column.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
+        headRow.appendChild(th);
+      });
+
+      $("resultsHead").appendChild(headRow);
+
+      data.forEach(record => {
+        const tr = document.createElement("tr");
+        columns.forEach(column => {
+          const td = document.createElement("td");
+          td.textContent = record[column] == null ? "—" : String(record[column]);
+          tr.appendChild(td);
+        });
+        $("resultsBody").appendChild(tr);
+      });
+
+      message($("resultsMessage"), `${data.length} result records loaded.`, "success");
+    }
+
+    $("refreshResults").addEventListener("click", loadResults);
+
+    // Restore the existing session after page refresh.
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT" || !session) {
+        currentUser = null;
+        showLogin();
+      } else if (event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
+        setTimeout(() => loadProfile(), 0);
+      }
+    });
+
+    // Also check the current session when the page first opens.
+    loadProfile();
+  </script>
+</body>
+</html>
